@@ -142,26 +142,26 @@
       with availability, pricing, and a curated flavor list for your event.
     </p>
 
-    <form class="booking-form" action="mailto:sheilia@thewayagency.com" method="post" enctype="text/plain">
+    <form id="booking-form" class="booking-form" novalidate>
       <div class="row">
         <label>
           <span>Your name</span>
-          <input type="text" name="Name" required />
+          <input type="text" name="name" required autocomplete="name" />
         </label>
         <label>
           <span>Email</span>
-          <input type="email" name="Email" required />
+          <input type="email" name="email" required autocomplete="email" />
         </label>
       </div>
 
       <div class="row">
         <label>
           <span>Phone</span>
-          <input type="tel" name="Phone" />
+          <input type="tel" name="phone" autocomplete="tel" />
         </label>
         <label>
           <span>Event type</span>
-          <select name="Event Type" required>
+          <select name="event_type" required>
             <option value="">Select…</option>
             <option>Wedding</option>
             <option>Birthday</option>
@@ -176,27 +176,33 @@
       <div class="row">
         <label>
           <span>Event date</span>
-          <input type="date" name="Event Date" required />
+          <input type="date" name="event_date" required />
         </label>
         <label>
           <span>Estimated guest count</span>
-          <input type="number" name="Guest Count" min="10" placeholder="e.g. 120" />
+          <input type="number" name="guest_count" min="1" max="10000" placeholder="e.g. 120" />
         </label>
       </div>
 
       <label class="full">
         <span>Event location</span>
-        <input type="text" name="Location" placeholder="Venue name &amp; town (Louisville, KY)" />
+        <input type="text" name="location" placeholder="Venue name &amp; town (Louisville, KY)" />
       </label>
 
       <label class="full">
         <span>Tell us about your celebration</span>
-        <textarea name="Notes" rows="4" placeholder="Theme, color palette, dietary needs, dream flavors…"></textarea>
+        <textarea name="notes" rows="4" placeholder="Theme, color palette, dietary needs, dream flavors…"></textarea>
       </label>
 
-      <button type="submit" class="btn btn-primary btn-wide">Send Booking Request</button>
+      <label class="hp" aria-hidden="true">
+        <span>Company</span>
+        <input type="text" name="_hp_company" tabindex="-1" autocomplete="off" />
+      </label>
+
+      <button type="submit" class="btn btn-primary btn-wide" id="booking-submit">Send Booking Request</button>
+      <div id="booking-status" class="form-status" role="status" aria-live="polite"></div>
       <p class="form-fineprint">
-        Or reach us directly at <a href="mailto:sheilia@thewayagency.com">sheilia@thewayagency.com</a>.
+        Or reach us directly at <a href="mailto:hello@boogibliss.com">hello@boogibliss.com</a>.
       </p>
     </form>
   </div>
@@ -210,13 +216,69 @@
       <p class="footer-sub">Founded with love by Booboo &amp; GiGi.</p>
     </div>
     <div class="footer-meta">
-      <p><a href="mailto:sheilia@thewayagency.com">sheilia@thewayagency.com</a></p>
+      <p><a href="mailto:hello@boogibliss.com">hello@boogibliss.com</a></p>
       <p>Serving Kentucky &amp; Indiana</p>
       <p class="copy">&copy; <span id="year"></span> Boogi Bliss. All rights reserved.</p>
     </div>
   </div>
 </footer>
 
-<script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+<script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  (function () {
+    var form = document.getElementById('booking-form');
+    if (!form) return;
+    var submit = document.getElementById('booking-submit');
+    var status = document.getElementById('booking-status');
+
+    function setStatus(msg, kind) {
+      status.textContent = msg || '';
+      status.className = 'form-status' + (kind ? ' is-' + kind : '');
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      setStatus('', '');
+
+      var data = {};
+      new FormData(form).forEach(function (v, k) { data[k] = v; });
+
+      if (!data.name || !data.email || !data.event_type || !data.event_date) {
+        setStatus('Please fill in name, email, event type, and event date.', 'error');
+        return;
+      }
+
+      submit.disabled = true;
+      var originalLabel = submit.textContent;
+      submit.textContent = 'Sending…';
+      setStatus('Sending your request…', '');
+
+      fetch('/api/book', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(data),
+      })
+        .then(function (res) {
+          return res.json().then(function (body) { return { ok: res.ok, body: body }; });
+        })
+        .then(function (r) {
+          if (r.ok && r.body && r.body.ok) {
+            form.reset();
+            setStatus("Thank you — we'll be in touch within two business days.", 'success');
+          } else {
+            setStatus((r.body && r.body.error) || 'Something went wrong. Please email hello@boogibliss.com.', 'error');
+          }
+        })
+        .catch(function () {
+          setStatus('Network error. Please email hello@boogibliss.com.', 'error');
+        })
+        .finally(function () {
+          submit.disabled = false;
+          submit.textContent = originalLabel;
+        });
+    });
+  })();
+</script>
 </body>
 </html>

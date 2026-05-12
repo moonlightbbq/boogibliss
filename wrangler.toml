@@ -1,0 +1,7 @@
+# Cloudflare Pages config for Boogi Bliss
+# Local dev: npx wrangler pages dev .
+# Production deploys happen via the GitHub integration in the Cloudflare dashboard.
+
+name = "boogibliss"
+compatibility_date = "2024-09-01"
+pages_build_output_dir = "."
