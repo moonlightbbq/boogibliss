@@ -1,13 +1,13 @@
 /**
- * Boogi Bliss booking form handler
- * Cloudflare Pages Function — POST /api/book
+ * Boogi Bliss — Cloudflare Worker (Static Assets + booking API)
  *
- * Receives a booking inquiry and sends it to hello@boogibliss.com via
- * Cloudflare's native email send binding (env.MAIL). Email Routing on
- * boogibliss.com then forwards to the real destination inbox.
+ * Serves the static site from /public via env.ASSETS, and handles
+ * POST /api/book by sending an email to hello@boogibliss.com via the
+ * native Cloudflare send binding (env.MAIL).
  *
- * Required: wrangler.toml [[send_email]] binding named "MAIL" with
- * destination_address = "hello@boogibliss.com".
+ * Bindings (see wrangler.toml):
+ *   ASSETS — static asset binding for ./public
+ *   MAIL   — send_email binding, destination locked to hello@boogibliss.com
  */
 
 import { EmailMessage } from 'cloudflare:email';
@@ -16,7 +16,7 @@ const ALLOWED_ORIGIN_HOSTS = new Set([
   'boogibliss.com',
   'www.boogibliss.com',
 ]);
-const ALLOWED_ORIGIN_SUFFIXES = ['.boogibliss.pages.dev'];
+const ALLOWED_ORIGIN_SUFFIXES = ['.workers.dev', '.boogibliss.pages.dev'];
 
 const EVENT_TYPES = new Set([
   'Wedding',
@@ -32,6 +32,15 @@ const rateLimitMap = new Map();
 
 const FROM_ADDRESS = 'noreply@boogibliss.com';
 const TO_ADDRESS = 'hello@boogibliss.com';
+
+const SECURITY_HEADERS = {
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=()',
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'",
+};
 
 function isAllowedOrigin(origin) {
   if (!origin) return false;
@@ -65,9 +74,6 @@ function checkRateLimit(ip) {
 }
 
 function stripTags(s) { return String(s).replace(/<[^>]*>/g, ''); }
-
-// Strip any character that could inject extra headers when interpolated
-// into a single-line MIME header value (CR, LF, NUL).
 function safeHeader(s) { return String(s || '').replace(/[\r\n\0]/g, ' ').trim(); }
 
 function escapeHtml(s) {
@@ -86,7 +92,6 @@ function json(body, status, request) {
 }
 
 function buildMime({ subject, fromAddress, toAddress, replyToName, replyToEmail, html }) {
-  // Subject restricted to ASCII for header simplicity (avoid RFC 2047 encoding).
   const safeSubject = safeHeader(subject).replace(/[^\x20-\x7E]/g, '');
   const safeReplyName = safeHeader(replyToName).replace(/"/g, '');
   const safeReplyEmail = safeHeader(replyToEmail);
@@ -107,11 +112,7 @@ function buildMime({ subject, fromAddress, toAddress, replyToName, replyToEmail,
   return headers + '\r\n\r\n' + html + '\r\n';
 }
 
-export async function onRequestOptions({ request }) {
-  return new Response(null, { headers: corsHeaders(request) });
-}
-
-export async function onRequestPost({ request, env }) {
+async function handleBooking(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   if (!checkRateLimit(ip)) {
     return json({ error: 'Too many requests. Please try again later.' }, 429, request);
@@ -215,3 +216,34 @@ export async function onRequestPost({ request, env }) {
 
   return json({ ok: true }, 200, request);
 }
+
+function withSecurityHeaders(response, request) {
+  const headers = new Headers(response.headers);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+
+  const contentType = headers.get('Content-Type') || '';
+  const path = new URL(request.url).pathname;
+  if (contentType.includes('text/html') || path === '/' || path.endsWith('.html')) {
+    headers.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  } else if (contentType.includes('css') || contentType.includes('javascript') || /\.(css|js)$/.test(path)) {
+    headers.set('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  }
+  return new Response(response.body, { status: response.status, headers });
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    if (url.pathname === '/api/book') {
+      if (request.method === 'POST') return handleBooking(request, env);
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { headers: corsHeaders(request) });
+      }
+      return json({ error: 'Method Not Allowed' }, 405, request);
+    }
+
+    const assetResponse = await env.ASSETS.fetch(request);
+    return withSecurityHeaders(assetResponse, request);
+  },
+};

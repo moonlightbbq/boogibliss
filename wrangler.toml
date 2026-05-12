@@ -1,14 +1,20 @@
-# Cloudflare Pages config for Boogi Bliss
-# Local dev: npx wrangler pages dev .
-# Production deploys happen via the GitHub integration in the Cloudflare dashboard.
+# Cloudflare Worker (Static Assets) config for Boogi Bliss
+# Serves public/ as static assets and routes /api/* through src/worker.js.
+# Local dev: npx wrangler dev
+# Deploys via the GitHub integration in the Cloudflare dashboard.
 
 name = "boogibliss"
+main = "src/worker.js"
 compatibility_date = "2024-09-01"
-pages_build_output_dir = "."
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "404-page"
 
 # Native Cloudflare email send binding.
 # Function calls env.MAIL.send(...) — Cloudflare's infrastructure handles
-# auth (DKIM) server-side. Limited to the destination_address below for safety.
+# DKIM signing server-side. Restricted to the destination_address below.
 [[send_email]]
 name = "MAIL"
 destination_address = "hello@boogibliss.com"
