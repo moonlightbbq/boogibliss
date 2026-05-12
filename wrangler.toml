@@ -5,3 +5,10 @@
 name = "boogibliss"
 compatibility_date = "2024-09-01"
 pages_build_output_dir = "."
+
+# Native Cloudflare email send binding.
+# Function calls env.MAIL.send(...) — Cloudflare's infrastructure handles
+# auth (DKIM) server-side. Limited to the destination_address below for safety.
+[[send_email]]
+name = "MAIL"
+destination_address = "hello@boogibliss.com"

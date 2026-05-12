@@ -2,16 +2,15 @@
  * Boogi Bliss booking form handler
  * Cloudflare Pages Function — POST /api/book
  *
- * Receives a booking inquiry and emails it to hello@boogibliss.com via MailChannels.
+ * Receives a booking inquiry and sends it to hello@boogibliss.com via
+ * Cloudflare's native email send binding (env.MAIL). Email Routing on
+ * boogibliss.com then forwards to the real destination inbox.
  *
- * Required DNS on boogibliss.com for MailChannels to deliver:
- *   1. SPF on root:           TXT  "v=spf1 include:relay.mailchannels.net ~all"
- *   2. Domain Lockdown:       TXT  _mailchannels  "v=mc1 cfid=<your-pages-subdomain>.pages.dev"
- *
- * Environment vars (optional, set via Pages dashboard):
- *   BOOKING_EMAIL   override recipient (default: hello@boogibliss.com)
- *   FROM_EMAIL      override sender   (default: noreply@boogibliss.com)
+ * Required: wrangler.toml [[send_email]] binding named "MAIL" with
+ * destination_address = "hello@boogibliss.com".
  */
+
+import { EmailMessage } from 'cloudflare:email';
 
 const ALLOWED_ORIGIN_HOSTS = new Set([
   'boogibliss.com',
@@ -30,6 +29,9 @@ const EVENT_TYPES = new Set([
 
 const RATE_LIMIT_MAX = 10;
 const rateLimitMap = new Map();
+
+const FROM_ADDRESS = 'noreply@boogibliss.com';
+const TO_ADDRESS = 'hello@boogibliss.com';
 
 function isAllowedOrigin(origin) {
   if (!origin) return false;
@@ -64,6 +66,10 @@ function checkRateLimit(ip) {
 
 function stripTags(s) { return String(s).replace(/<[^>]*>/g, ''); }
 
+// Strip any character that could inject extra headers when interpolated
+// into a single-line MIME header value (CR, LF, NUL).
+function safeHeader(s) { return String(s || '').replace(/[\r\n\0]/g, ' ').trim(); }
+
 function escapeHtml(s) {
   return String(s || '')
     .replace(/&/g, '&amp;')
@@ -77,6 +83,28 @@ function json(body, status, request) {
     status,
     headers: { 'Content-Type': 'application/json', ...corsHeaders(request) },
   });
+}
+
+function buildMime({ subject, fromAddress, toAddress, replyToName, replyToEmail, html }) {
+  // Subject restricted to ASCII for header simplicity (avoid RFC 2047 encoding).
+  const safeSubject = safeHeader(subject).replace(/[^\x20-\x7E]/g, '');
+  const safeReplyName = safeHeader(replyToName).replace(/"/g, '');
+  const safeReplyEmail = safeHeader(replyToEmail);
+  const msgId = `<${crypto.randomUUID()}@boogibliss.com>`;
+
+  const headers = [
+    `From: Boogi Bliss Bookings <${fromAddress}>`,
+    `To: Boogi Bliss <${toAddress}>`,
+    `Reply-To: "${safeReplyName}" <${safeReplyEmail}>`,
+    `Subject: ${safeSubject}`,
+    `Date: ${new Date().toUTCString()}`,
+    `Message-ID: ${msgId}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/html; charset="UTF-8"`,
+    `Content-Transfer-Encoding: 8bit`,
+  ].join('\r\n');
+
+  return headers + '\r\n\r\n' + html + '\r\n';
 }
 
 export async function onRequestOptions({ request }) {
@@ -137,12 +165,9 @@ export async function onRequestPost({ request, env }) {
   const notes = data.notes && typeof data.notes === 'string'
     ? data.notes.slice(0, 5000) : '';
 
-  const toEmail = env.BOOKING_EMAIL || 'hello@boogibliss.com';
-  const fromEmail = env.FROM_EMAIL || 'noreply@boogibliss.com';
-
   const submittedAt = new Date().toISOString();
   const rows = [
-    ['Name', name],
+    ['Name', escapeHtml(name)],
     ['Email', `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`],
     phone ? ['Phone', `<a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>`] : null,
     ['Event Type', escapeHtml(eventType)],
@@ -155,7 +180,7 @@ export async function onRequestPost({ request, env }) {
   const tableRows = rows.map(([label, value]) => `
     <tr>
       <td style="padding:8px 12px;color:#6b7280;border-bottom:1px solid #e5e7eb;width:140px;vertical-align:top;">${label}</td>
-      <td style="padding:8px 12px;font-weight:500;border-bottom:1px solid #e5e7eb;color:#1f2937;">${label === 'Name' ? escapeHtml(value) : value}</td>
+      <td style="padding:8px 12px;font-weight:500;border-bottom:1px solid #e5e7eb;color:#1f2937;">${value}</td>
     </tr>
   `).join('');
 
@@ -170,26 +195,22 @@ export async function onRequestPost({ request, env }) {
     </div>
   `;
 
+  const subject = `Booking inquiry - ${name} | ${eventType} | ${eventDate}`;
+  const rawMime = buildMime({
+    subject,
+    fromAddress: FROM_ADDRESS,
+    toAddress: TO_ADDRESS,
+    replyToName: name,
+    replyToEmail: email,
+    html,
+  });
+
   try {
-    const res = await fetch('https://api.mailchannels.net/tx/v1/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: toEmail, name: 'Boogi Bliss' }] }],
-        from: { email: fromEmail, name: 'Boogi Bliss Bookings' },
-        reply_to: { email, name },
-        subject: `Booking inquiry — ${name} · ${eventType} · ${eventDate}`,
-        content: [{ type: 'text/html', value: html }],
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      console.error('MailChannels error', res.status, body);
-      return json({ error: 'Email delivery failed. Please email hello@boogibliss.com directly.' }, 502, request);
-    }
+    const message = new EmailMessage(FROM_ADDRESS, TO_ADDRESS, rawMime);
+    await env.MAIL.send(message);
   } catch (err) {
-    console.error('Booking handler error', err);
-    return json({ error: 'Something went wrong. Please email hello@boogibliss.com directly.' }, 500, request);
+    console.error('env.MAIL.send failed', err && err.message, err && err.stack);
+    return json({ error: 'Email delivery failed. Please email hello@boogibliss.com directly.' }, 502, request);
   }
 
   return json({ ok: true }, 200, request);
