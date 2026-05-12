@@ -17,7 +17,7 @@ not_found_handling = "404-page"
 # DKIM signing server-side. Restricted to the destination_address below.
 [[send_email]]
 name = "MAIL"
-destination_address = "hello@boogibliss.com"
+destination_address = "clukeroyal@gmail.com"
 
 # Enable Workers Logs so we can stream console output from the dashboard.
 [observability]
