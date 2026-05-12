@@ -18,3 +18,11 @@ not_found_handling = "404-page"
 [[send_email]]
 name = "MAIL"
 destination_address = "hello@boogibliss.com"
+
+# Enable Workers Logs so we can stream console output from the dashboard.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
