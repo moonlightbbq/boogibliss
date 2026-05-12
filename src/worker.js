@@ -31,7 +31,7 @@ const RATE_LIMIT_MAX = 10;
 const rateLimitMap = new Map();
 
 const FROM_ADDRESS = 'noreply@boogibliss.com';
-const TO_ADDRESS = 'clukeroyal@gmail.com';
+const TO_ADDRESS = 'sheilia@thewayagency.com';
 
 const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
