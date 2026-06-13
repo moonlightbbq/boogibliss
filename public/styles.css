@@ -574,3 +574,39 @@ a:hover { color: var(--gold); }
 @media (max-width: 620px) {
   .footer-meta { text-align: left; }
 }
+
+/* ─── Accessibility & form-legibility additions ─────────────── */
+
+/* 1. Required-field markers (<span class="req">*</span>) */
+.req {
+  color: #b3452f;
+  margin-left: 2px;
+}
+/* On the dark booking form, labels are light — use a warm gold so the asterisk stays visible */
+.booking-form .req {
+  color: var(--gold-soft);
+}
+
+/* 2. Respect reduced-motion: neutralize scroll + decorative motion only.
+   Input focus color/background transitions are intentionally left intact. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .offer { transition: none; }
+  .offer:hover { transform: none; }
+  .btn { transition: none; }
+  .btn:hover { transform: none; }
+}
+
+/* 3. Dark booking-form input legibility.
+   Form background is the deep navy section; inputs sit on rgba(250,246,238,0.05).
+   color-scheme: dark makes native date-picker chrome + calendar icon legible. */
+.booking-form input,
+.booking-form select,
+.booking-form textarea,
+.booking-form input[type="date"] {
+  color-scheme: dark;
+}
+.booking-form ::placeholder {
+  color: rgba(250, 246, 238, 0.6);
+  opacity: 1;
+}
