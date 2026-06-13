@@ -40,7 +40,10 @@ const SECURITY_HEADERS = {
   'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=()',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'",
+  // challenges.cloudflare.com is pre-allowed for Cloudflare Turnstile. It is
+  // inert until Turnstile is activated (no widget = no request to that origin),
+  // so enabling Turnstile later needs no CSP change. See handleBooking().
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; form-action 'self'; base-uri 'self'",
 };
 
 function isAllowedOrigin(origin) {
@@ -113,6 +116,25 @@ function buildMime({ subject, fromAddress, toAddress, replyToName, replyToEmail,
   return headers + '\r\n\r\n' + html + '\r\n';
 }
 
+// Cloudflare Turnstile server-side verification. Dormant until env.TURNSTILE_SECRET
+// is bound (see handleBooking). Returns true on a valid, unused token.
+const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+async function verifyTurnstile(token, secret, ip) {
+  if (!token) return false;
+  const form = new FormData();
+  form.append('secret', secret);
+  form.append('response', token);
+  if (ip && ip !== 'unknown') form.append('remoteip', ip);
+  try {
+    const res = await fetch(TURNSTILE_VERIFY_URL, { method: 'POST', body: form });
+    const out = await res.json();
+    return out && out.success === true;
+  } catch (err) {
+    console.error('turnstile verify failed', err && err.message);
+    return false;
+  }
+}
+
 async function handleBooking(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   if (!checkRateLimit(ip)) {
@@ -121,8 +143,8 @@ async function handleBooking(request, env) {
 
   // Server-side Origin allowlist. Modern browsers always send Origin on fetch
   // POST (same-origin included), so this is safe for the real form and blocks
-  // naive cross-origin / no-Origin bot posts. Recommended keyed follow-up:
-  // Cloudflare Turnstile + native Rate Limiting (both need dashboard setup).
+  // naive cross-origin / no-Origin bot posts. Stronger bot defense (Turnstile)
+  // is wired below; native Rate Limiting remains a recommended follow-up.
   const origin = request.headers.get('Origin');
   if (!isAllowedOrigin(origin)) {
     return json({ error: 'Invalid origin' }, 403, request);
@@ -134,6 +156,18 @@ async function handleBooking(request, env) {
 
   if (data._hp_company) {
     return json({ error: 'Verification failed' }, 403, request);
+  }
+
+  // Turnstile gate — DORMANT until env.TURNSTILE_SECRET is bound.
+  // ⚠️ Activate in lockstep: set TURNSTILE_SITEKEY in public/index.html AND
+  // deploy that first, THEN bind TURNSTILE_SECRET. Binding the secret without a
+  // matching site key in the page makes the widget send no token and every
+  // booking is rejected here. See NOTES.md → "Turnstile".
+  if (env.TURNSTILE_SECRET) {
+    const token = typeof data['cf-turnstile-response'] === 'string' ? data['cf-turnstile-response'] : '';
+    if (!(await verifyTurnstile(token, env.TURNSTILE_SECRET, ip))) {
+      return json({ error: 'Verification failed. Please refresh and try again.' }, 403, request);
+    }
   }
 
   const name = data.name && typeof data.name === 'string' ? stripTags(data.name.trim()).slice(0, 100) : '';

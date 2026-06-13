@@ -7,6 +7,7 @@
 <meta name="description" content="Boogi Bliss serves luxury ice cream from a charming cart and stand at weddings, birthdays, and corporate events across Kentucky and Indiana. Over 30 small-batch flavors. Founded by Booboo & GiGi." />
 <link rel="canonical" href="https://boogibliss.com/" />
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Boogi Bliss" />
 <meta property="og:title" content="Boogi Bliss — Luxury Ice Cream for Life's Sweetest Moments" />
@@ -224,6 +225,10 @@
         </p>
       </noscript>
 
+      <!-- Cloudflare Turnstile mount point. Stays empty (and inert) until a site
+           key is configured in the script below. See NOTES.md → "Turnstile". -->
+      <div id="cf-turnstile" class="cf-turnstile-holder"></div>
+
       <button type="submit" class="btn btn-primary btn-wide" id="booking-submit">Send Booking Request</button>
       <div id="booking-status" class="form-status" role="status" aria-live="polite"></div>
       <p class="form-fineprint">
@@ -250,6 +255,24 @@
 
 <script>
   document.getElementById('year').textContent = new Date().getFullYear();
+
+  // Cloudflare Turnstile (dormant). Paste your site key between the quotes to
+  // enable; the widget then renders into #cf-turnstile and injects a hidden
+  // "cf-turnstile-response" field that the booking POST forwards automatically.
+  // Activate the matching server secret (TURNSTILE_SECRET) only AFTER this is
+  // live — see NOTES.md → "Turnstile".
+  var TURNSTILE_SITEKEY = '';
+  if (TURNSTILE_SITEKEY) {
+    var ts = document.createElement('script');
+    ts.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    ts.async = true; ts.defer = true;
+    ts.onload = function () {
+      if (window.turnstile) {
+        window.turnstile.render('#cf-turnstile', { sitekey: TURNSTILE_SITEKEY });
+      }
+    };
+    document.head.appendChild(ts);
+  }
 
   (function () {
     var form = document.getElementById('booking-form');
