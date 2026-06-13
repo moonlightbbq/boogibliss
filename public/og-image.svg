@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Boogi Bliss — Luxury ice cream for life's sweetest moments.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFDF7"/>
+      <stop offset="1" stop-color="#faf6ee"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Cream background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Thin tan inner frame -->
+  <rect x="40" y="40" width="1120" height="550" fill="none" stroke="#8a7556" stroke-opacity="0.35" stroke-width="2"/>
+
+  <!-- B·B monogram inside a gold ring (matches header brand-mark) -->
+  <g transform="translate(600 188)">
+    <circle cx="0" cy="0" r="74" fill="none" stroke="#C9A961" stroke-width="2.5"/>
+    <text x="0" y="2" fill="#173358" font-family="Georgia, 'Times New Roman', serif" font-size="62" font-weight="600" text-anchor="middle" dominant-baseline="central" letter-spacing="1">B<tspan fill="#C9A961">·</tspan>B</text>
+  </g>
+
+  <!-- Eyebrow -->
+  <text x="600" y="318" fill="#7E9070" font-family="Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="500" letter-spacing="8" text-anchor="middle">KENTUCKY · INDIANA</text>
+
+  <!-- Wordmark -->
+  <text x="600" y="408" fill="#173358" font-family="Georgia, 'Times New Roman', serif" font-size="92" font-weight="500" letter-spacing="1" text-anchor="middle">Boogi Bliss</text>
+
+  <!-- Tagline -->
+  <text x="600" y="470" fill="#5A5A55" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="38" text-anchor="middle">Luxury ice cream for life&#8217;s sweetest moments.</text>
+
+  <!-- Subtle scallop edge (adapted from hero motif) -->
+  <path d="M0,630 C100,560 200,560 300,590 C400,620 500,560 600,580 C700,600 800,550 900,580 C1000,610 1100,570 1200,590 L1200,630 Z" fill="#173358"/>
+  <path d="M0,630 C100,575 200,575 300,602 C400,629 500,575 600,592 C700,609 800,565 900,592 C1000,619 1100,583 1200,601 L1200,630 Z" fill="#8a7556" fill-opacity="0.25"/>
+</svg>

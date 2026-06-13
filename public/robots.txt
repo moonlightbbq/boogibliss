@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://boogibliss.com/sitemap.xml

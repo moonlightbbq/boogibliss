@@ -2,12 +2,13 @@
  * Boogi Bliss — Cloudflare Worker (Static Assets + booking API)
  *
  * Serves the static site from /public via env.ASSETS, and handles
- * POST /api/book by sending an email to hello@boogibliss.com via the
- * native Cloudflare send binding (env.MAIL).
+ * POST /api/book by sending an email to sheilia@thewayagency.com via the
+ * native Cloudflare send binding (env.MAIL). Note: hello@boogibliss.com is
+ * the public-facing contact address shown to users, NOT the delivery target.
  *
  * Bindings (see wrangler.toml):
  *   ASSETS — static asset binding for ./public
- *   MAIL   — send_email binding, destination locked to hello@boogibliss.com
+ *   MAIL   — send_email binding, destination locked to sheilia@thewayagency.com
  */
 
 import { EmailMessage } from 'cloudflare:email';
@@ -118,6 +119,15 @@ async function handleBooking(request, env) {
     return json({ error: 'Too many requests. Please try again later.' }, 429, request);
   }
 
+  // Server-side Origin allowlist. Modern browsers always send Origin on fetch
+  // POST (same-origin included), so this is safe for the real form and blocks
+  // naive cross-origin / no-Origin bot posts. Recommended keyed follow-up:
+  // Cloudflare Turnstile + native Rate Limiting (both need dashboard setup).
+  const origin = request.headers.get('Origin');
+  if (!isAllowedOrigin(origin)) {
+    return json({ error: 'Invalid origin' }, 403, request);
+  }
+
   let data;
   try { data = await request.json(); }
   catch { return json({ error: 'Invalid JSON' }, 400, request); }
@@ -192,7 +202,7 @@ async function handleBooking(request, env) {
       <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e5e7eb;">
         ${tableRows}
       </table>
-      <p style="font-size:11px;color:#9ca3af;margin-top:16px;">Submitted ${escapeHtml(submittedAt)} from IP ${escapeHtml(ip)}</p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:16px;">Submitted ${escapeHtml(submittedAt)}</p>
     </div>
   `;
 
