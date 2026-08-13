@@ -505,13 +505,12 @@ a:hover { color: var(--gold); }
 .form-fineprint a { color: var(--gold-soft); border-bottom: 1px solid rgba(217, 190, 131, 0.4); }
 .form-fineprint a:hover { color: var(--gold); }
 
-/* Honeypot — visible to bots, hidden from people + assistive tech */
-.booking-form label.hp {
-  position: absolute;
-  left: -10000px;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
+/* Anti-spam trap — hidden from people, assistive tech, and autofill.
+   Must stay display:none: Chrome and the password managers skip display:none
+   fields when autofilling but happily populate an off-screen one, which trips
+   the trap for real visitors. See index.html. */
+.booking-form .hp {
+  display: none;
 }
 
 /* Submit button state */

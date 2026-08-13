@@ -147,6 +147,7 @@ async function handleBooking(request, env) {
   // is wired below; native Rate Limiting remains a recommended follow-up.
   const origin = request.headers.get('Origin');
   if (!isAllowedOrigin(origin)) {
+    console.warn('booking rejected: origin');
     return json({ error: 'Invalid origin' }, 403, request);
   }
 
@@ -154,8 +155,13 @@ async function handleBooking(request, env) {
   try { data = await request.json(); }
   catch { return json({ error: 'Invalid JSON' }, 400, request); }
 
-  if (data._hp_company) {
-    return json({ error: 'Verification failed' }, 403, request);
+  // Anti-spam trap (public/index.html). The field is display:none and named so
+  // autofill can't classify it, so a real person reaching here should be
+  // impossible — but the message still hands them a way through if some future
+  // autofill engine outsmarts the trap, rather than dead-ending the booking.
+  if (data._hp_ref) {
+    console.warn('booking rejected: honeypot');
+    return json({ error: "We couldn't verify this submission. Please email hello@boogibliss.com and we'll take care of it." }, 403, request);
   }
 
   // Turnstile gate — DORMANT until env.TURNSTILE_SECRET is bound.
@@ -258,6 +264,10 @@ async function handleBooking(request, env) {
     return json({ error: 'Email delivery failed. Please email hello@boogibliss.com directly.' }, 502, request);
   }
 
+  // Workers Logs is currently the only record that a booking happened at all —
+  // retention is days, so it is a diagnostic aid, not the durable submission
+  // log this form still needs. Deliberately free of submitter PII.
+  console.log('booking accepted');
   return json({ ok: true }, 200, request);
 }
 
