@@ -213,10 +213,17 @@
         <textarea name="notes" rows="4" placeholder="Theme, color palette, dietary needs, dream flavors…"></textarea>
       </label>
 
-      <label class="hp" aria-hidden="true">
-        <span>Company</span>
-        <input type="text" name="_hp_company" tabindex="-1" autocomplete="off" />
-      </label>
+      <!-- Anti-spam trap. Nothing here may look like a real field to browser
+           autofill: Chrome classifies by name/id/label and maps anything
+           matching company|organization|address|… onto the visitor's saved
+           profile, and it only skips fields hidden with display:none — an
+           off-screen trap still gets autofilled, which 403s real people.
+           So: no label, no autofill-classifiable name, display:none.
+           Server check lives in worker.js handleBooking (_hp_ref). -->
+      <div class="hp" aria-hidden="true">
+        <input type="text" name="_hp_ref" tabindex="-1" autocomplete="off"
+               data-1p-ignore data-lpignore="true" data-form-type="other" />
+      </div>
 
       <noscript>
         <p class="form-fineprint">
