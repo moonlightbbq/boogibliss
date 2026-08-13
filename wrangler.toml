@@ -19,6 +19,18 @@ not_found_handling = "single-page-application"
 name = "MAIL"
 destination_address = "sheilia@thewayagency.com"  # MUST stay equal to TO_ADDRESS in src/worker.js — if these diverge, every send() throws and bookings 502.
 
+# Durable record of every booking attempt (accepted AND rejected).
+# Workers Logs retention is days, and before this the delivered email was the
+# only lasting evidence a booking happened at all — so anything rejected before
+# the mail send left no trace and the form's submission count was unknowable.
+# Migrations live in ./migrations; apply with:
+#   npx wrangler d1 migrations apply boogibliss-bookings --remote
+[[d1_databases]]
+binding = "DB"
+database_name = "boogibliss-bookings"
+database_id = "e00e3bc1-b9f9-40f6-8914-c6e946e62563"
+migrations_dir = "migrations"
+
 # Enable Workers Logs so we can stream console output from the dashboard.
 [observability]
 enabled = true

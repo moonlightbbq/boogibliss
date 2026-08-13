@@ -4,6 +4,37 @@ Three items from the deep review need Cloudflare dashboard / DNS / mailbox
 access and can't be done from the repo. The code side of each is already wired;
 these are the manual steps to finish them.
 
+## 0. Counting submissions
+
+Every booking attempt is recorded in the `boogibliss-bookings` D1 database,
+including the ones the form rejects. Before this the delivered email was the
+only lasting evidence a booking happened, so anything turned away before the
+send vanished with no trace beyond a Workers Log line that ages out in days —
+which is why the form's submission count was, for three months, unknowable.
+
+```bash
+# How many submissions, broken down by what happened to them
+npx wrangler d1 execute boogibliss-bookings --remote \
+  --command "SELECT outcome, reason, COUNT(*) AS n FROM bookings GROUP BY outcome, reason ORDER BY n DESC"
+
+# The real inquiries, newest first
+npx wrangler d1 execute boogibliss-bookings --remote \
+  --command "SELECT created_at, name, email, phone, event_type, event_date FROM bookings WHERE outcome='accepted' ORDER BY created_at DESC LIMIT 50"
+
+# Accepted but the email never went out — chase these by hand
+npx wrangler d1 execute boogibliss-bookings --remote \
+  --command "SELECT created_at, name, email, phone FROM bookings WHERE outcome='accepted' AND reason='email_send_failed'"
+```
+
+`outcome='accepted'` means the submission passed every check and we tried to
+mail it. `reason` explains a rejection (`honeypot`, `invalid_email`,
+`missing_name`, …) or, on an accepted row, flags a delivery failure. Rate-limit
+and bad-Origin hits are deliberately **not** recorded — they are unbounded bot
+noise, and logging them would let a bot fill the table.
+
+Writes are best-effort by design: if D1 is unavailable the booking still goes
+through and only the log line is lost. Never make this path throw.
+
 ## 1. DMARC record (email deliverability)
 
 SPF and DKIM are already present and aligned for `boogibliss.com` (Cloudflare

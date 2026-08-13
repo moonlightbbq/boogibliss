@@ -135,6 +135,49 @@ async function verifyTurnstile(token, secret, ip) {
   }
 }
 
+// ── Durable booking log (D1) ─────────────────────────────────────────────────
+// Every write here is best-effort and MUST stay that way: bookkeeping failing
+// is annoying, a booking failing costs a customer. A D1 outage must never turn
+// into a 500 on the form, so every call is wrapped and swallowed.
+async function recordBooking(env, row) {
+  if (!env.DB) return;
+  try {
+    await env.DB.prepare(
+      `INSERT INTO bookings (id, created_at, outcome, reason, name, email, phone,
+                             event_type, event_date, guest_count, location, notes)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`
+    ).bind(
+      row.id, row.created_at, row.outcome, row.reason ?? null,
+      row.name ?? null, row.email ?? null, row.phone ?? null,
+      row.event_type ?? null, row.event_date ?? null, row.guest_count ?? null,
+      row.location ?? null, row.notes ?? null
+    ).run();
+  } catch (err) {
+    console.error('booking log insert failed', err && err.message);
+  }
+}
+
+// An accepted row is written before the send, so a booking is recorded even if
+// delivery dies. This stamps the delivery failure onto that row afterwards —
+// outcome stays 'accepted' because the submission WAS received; only the email
+// failed, and that distinction is the whole point of logging before sending.
+async function markSendFailed(env, id) {
+  if (!env.DB) return;
+  try {
+    await env.DB.prepare('UPDATE bookings SET reason = ?1 WHERE id = ?2')
+      .bind('email_send_failed', id).run();
+  } catch (err) {
+    console.error('booking log update failed', err && err.message);
+  }
+}
+
+function logField(v, max) {
+  if (v === null || v === undefined) return null;
+  const s = typeof v === 'string' ? v : String(v);
+  const t = s.trim().slice(0, max);
+  return t === '' ? null : t;
+}
+
 async function handleBooking(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   if (!checkRateLimit(ip)) {
@@ -155,13 +198,40 @@ async function handleBooking(request, env) {
   try { data = await request.json(); }
   catch { return json({ error: 'Invalid JSON' }, 400, request); }
 
+  // Everything below this line is logged, whatever becomes of it — a submission
+  // the form threw away is precisely the thing worth counting. The paths above
+  // (no/!allowed Origin, unparseable body) are unbounded bot noise and are not
+  // recorded; everything from here is bounded by the per-IP rate limit.
+  const attemptId = crypto.randomUUID();
+  const submittedAt = new Date().toISOString();
+  const submitted = {
+    name: logField(data.name, 100),
+    email: logField(data.email, 254),
+    phone: logField(data.phone, 32),
+    event_type: logField(data.event_type, 60),
+    event_date: logField(data.event_date, 20),
+    guest_count: logField(data.guest_count, 10),
+    location: logField(data.location, 200),
+    notes: logField(data.notes, 5000),
+  };
+
+  const reject = async (reason, message, status) => {
+    console.warn(`booking rejected: ${reason}`);
+    await recordBooking(env, {
+      id: attemptId, created_at: submittedAt, outcome: 'rejected', reason, ...submitted,
+    });
+    return json({ error: message }, status, request);
+  };
+
   // Anti-spam trap (public/index.html). The field is display:none and named so
   // autofill can't classify it, so a real person reaching here should be
   // impossible — but the message still hands them a way through if some future
   // autofill engine outsmarts the trap, rather than dead-ending the booking.
+  // Logged rather than dropped: this trap silently ate every real booking the
+  // site ever received, and the only reason that went unnoticed for three
+  // months is that nothing wrote it down.
   if (data._hp_ref) {
-    console.warn('booking rejected: honeypot');
-    return json({ error: "We couldn't verify this submission. Please email hello@boogibliss.com and we'll take care of it." }, 403, request);
+    return reject('honeypot', "We couldn't verify this submission. Please email hello@boogibliss.com and we'll take care of it.", 403);
   }
 
   // Turnstile gate — DORMANT until env.TURNSTILE_SECRET is bound.
@@ -172,18 +242,18 @@ async function handleBooking(request, env) {
   if (env.TURNSTILE_SECRET) {
     const token = typeof data['cf-turnstile-response'] === 'string' ? data['cf-turnstile-response'] : '';
     if (!(await verifyTurnstile(token, env.TURNSTILE_SECRET, ip))) {
-      return json({ error: 'Verification failed. Please refresh and try again.' }, 403, request);
+      return reject('turnstile', 'Verification failed. Please refresh and try again.', 403);
     }
   }
 
   const name = data.name && typeof data.name === 'string' ? stripTags(data.name.trim()).slice(0, 100) : '';
-  if (!name) return json({ error: 'Name is required' }, 400, request);
+  if (!name) return reject('missing_name', 'Name is required', 400);
 
   const emailRaw = data.email && typeof data.email === 'string' ? data.email.trim().slice(0, 254) : '';
-  if (!emailRaw) return json({ error: 'Email is required' }, 400, request);
-  if (/[\r\n]/.test(emailRaw)) return json({ error: 'Invalid email address' }, 400, request);
+  if (!emailRaw) return reject('missing_email', 'Email is required', 400);
+  if (/[\r\n]/.test(emailRaw)) return reject('invalid_email', 'Invalid email address', 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
-    return json({ error: 'Invalid email address' }, 400, request);
+    return reject('invalid_email', 'Invalid email address', 400);
   }
   const email = emailRaw;
 
@@ -194,19 +264,19 @@ async function handleBooking(request, env) {
 
   const eventType = data.event_type && typeof data.event_type === 'string' ? data.event_type.trim() : '';
   if (!eventType || !EVENT_TYPES.has(eventType)) {
-    return json({ error: 'Please select a valid event type' }, 400, request);
+    return reject('invalid_event_type', 'Please select a valid event type', 400);
   }
 
   const eventDate = data.event_date && typeof data.event_date === 'string' ? data.event_date.trim() : '';
   if (!eventDate || !/^\d{4}-\d{2}-\d{2}$/.test(eventDate) || Number.isNaN(Date.parse(eventDate))) {
-    return json({ error: 'Please provide a valid event date' }, 400, request);
+    return reject('invalid_event_date', 'Please provide a valid event date', 400);
   }
 
   let guestCount = '';
   if (data.guest_count !== undefined && data.guest_count !== null && data.guest_count !== '') {
     const n = parseInt(String(data.guest_count), 10);
     if (Number.isNaN(n) || n < 1 || n > 10000) {
-      return json({ error: 'Guest count looks off — try a number between 1 and 10000' }, 400, request);
+      return reject('invalid_guest_count', 'Guest count looks off — try a number between 1 and 10000', 400);
     }
     guestCount = String(n);
   }
@@ -216,7 +286,8 @@ async function handleBooking(request, env) {
   const notes = data.notes && typeof data.notes === 'string'
     ? data.notes.slice(0, 5000) : '';
 
-  const submittedAt = new Date().toISOString();
+  // submittedAt is stamped once, up top, when the post arrives — the email
+  // footer and the logged row must agree on when this booking came in.
   const rows = [
     ['Name', escapeHtml(name)],
     ['Email', `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`],
@@ -256,17 +327,35 @@ async function handleBooking(request, env) {
     html,
   });
 
+  // Recorded BEFORE the send, on purpose. The submission has been received and
+  // accepted at this point; whether Cloudflare then manages to deliver the mail
+  // is a separate question. Writing after a successful send would lose exactly
+  // the bookings worth chasing — the ones where the customer was told "thank
+  // you" and the email never arrived.
+  await recordBooking(env, {
+    id: attemptId,
+    created_at: submittedAt,
+    outcome: 'accepted',
+    reason: null,
+    name,
+    email,
+    phone: phone || null,
+    event_type: eventType,
+    event_date: eventDate,
+    guest_count: guestCount || null,
+    location: location || null,
+    notes: notes || null,
+  });
+
   try {
     const message = new EmailMessage(FROM_ADDRESS, TO_ADDRESS, rawMime);
     await env.MAIL.send(message);
   } catch (err) {
     console.error('env.MAIL.send failed', err && err.message, err && err.stack);
+    await markSendFailed(env, attemptId);
     return json({ error: 'Email delivery failed. Please email hello@boogibliss.com directly.' }, 502, request);
   }
 
-  // Workers Logs is currently the only record that a booking happened at all —
-  // retention is days, so it is a diagnostic aid, not the durable submission
-  // log this form still needs. Deliberately free of submitter PII.
   console.log('booking accepted');
   return json({ ok: true }, 200, request);
 }
